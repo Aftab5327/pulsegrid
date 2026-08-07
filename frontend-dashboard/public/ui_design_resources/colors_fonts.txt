@@ -1,0 +1,11 @@
+Colours & Fonts
+
+Teal - 3FFDE0
+Gray - E6EAF5
+White - FFFFFF
+Black - 000000
+
+Fonts
+Font Name - Poppins
+Base Size - 16px
+4-point Size grid

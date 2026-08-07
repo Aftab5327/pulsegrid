@@ -1,0 +1,20 @@
+﻿# Node
+node_modules/
+dist/
+.vite/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Mosquitto runtime
+mosquitto/data/
+mosquitto/log/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/

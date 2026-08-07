@@ -1,0 +1,12 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: digispace-mosquitto
+    ports:
+      - "1883:1883" # MQTT
+      - "9001:9001" # MQTT over WebSockets
+    volumes:
+      # Whole directory rather than the single file, so a future passwd file and
+      # TLS certs land in the same place the config already points at.
+      - ./mosquitto/config:/mosquitto/config:ro
+    restart: unless-stopped
