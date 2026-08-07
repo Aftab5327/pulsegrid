@@ -1,41 +1,35 @@
 import React, { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { useLiveData } from '../hooks/useLiveData';
+import { MIX_SLICES } from '../utils/metrics';
 
 interface CarbonCardProps {
   className?: string;
 }
 
-/** Keyed by source so a reordered mix keeps its colour. */
-const SOURCE_COLORS: Record<string, string> = {
-  Coal: '#8f4e44',
-  Hydro: '#f2a14a',
-  Nuclear: '#a56bff',
-  Wind: '#27e5d4',
-  Solar: '#f15f61',
-};
-const FALLBACK_COLOR = '#6b7280';
-
-/**
- * The generation-mix breakdown has no source in the current telemetry contract
- * — the carbon sensor publishes a single intensity value and no mix. The donut
- * therefore renders empty rather than showing an invented split. Once the
- * sensor publishes a mix, populate `mix` below and the chart lights up.
- */
-type MixSlice = { name: string; value: number };
-const mix: MixSlice[] = [];
+/** Ring shown before the first reading: one neutral slice, no labels. */
+const PLACEHOLDER_RING = [{ name: '', value: 1 }];
+const PLACEHOLDER_COLOR = 'rgba(255,255,255,0.08)';
 
 const CarbonCard: React.FC<CarbonCardProps> = ({ className }) => {
   const cardClassName = ['card', 'card-carbon', className].filter(Boolean).join(' ');
   const { latest } = useLiveData();
 
   const value = latest.carbon?.value;
+  const mix = latest.carbon?.mix;
 
-  const option = useMemo(
-    () => ({
+  const option = useMemo(() => {
+    const hasMix = Boolean(mix);
+    const data = hasMix
+      ? MIX_SLICES.map((slice) => ({ name: slice.name, value: mix?.[slice.key] ?? 0 }))
+      : PLACEHOLDER_RING;
+    const colors = hasMix ? MIX_SLICES.map((slice) => slice.color) : [PLACEHOLDER_COLOR];
+
+    return {
       tooltip: {
         trigger: 'item',
         formatter: '{b}: {d}%',
+        show: hasMix,
       },
       legend: { show: false },
       series: [
@@ -43,8 +37,9 @@ const CarbonCard: React.FC<CarbonCardProps> = ({ className }) => {
           type: 'pie',
           radius: ['60%', '85%'],
           avoidLabelOverlap: false,
+          silent: !hasMix,
           label: {
-            show: true,
+            show: hasMix,
             formatter: '{d}%\n{b}',
             color: '#fff',
             fontSize: 11,
@@ -52,17 +47,16 @@ const CarbonCard: React.FC<CarbonCardProps> = ({ className }) => {
             lineHeight: 14,
           },
           labelLine: {
-            show: true,
+            show: hasMix,
             length: 10,
             length2: 8,
           },
-          data: mix,
-          color: mix.map((slice) => SOURCE_COLORS[slice.name] ?? FALLBACK_COLOR),
+          data,
+          color: colors,
         },
       ],
-    }),
-    [],
-  );
+    };
+  }, [mix]);
 
   return (
     <div className={cardClassName}>

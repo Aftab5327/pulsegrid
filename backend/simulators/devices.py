@@ -26,7 +26,7 @@ import random
 import signal
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
@@ -40,6 +40,44 @@ SITE = os.getenv("SITE", "building-1")
 MQTT_QOS = int(os.getenv("MQTT_QOS", "1"))
 
 TOPIC_TEMPLATE = "digispace/sensors/{sensor_id}/telemetry"
+
+# --- generation mix ----------------------------------------------------------
+
+# Lifecycle emission factors, gCO2 per kWh generated. Coal dominates by an order
+# of magnitude, so grid intensity tracks the coal share almost entirely.
+EMISSION_FACTORS: dict[str, float] = {
+    "solar": 48.0,
+    "wind": 11.0,
+    "nuclear": 12.0,
+    "hydro": 24.0,
+    "coal": 820.0,
+}
+
+BASELINE_MIX: dict[str, float] = {
+    "solar": 15.0,
+    "wind": 15.0,
+    "nuclear": 20.0,
+    "hydro": 20.0,
+    "coal": 30.0,
+}
+
+# Smallest share any source may drift down to, so nothing vanishes entirely.
+MIN_SHARE = 0.5
+
+
+def round_to_100(shares: dict[str, float], precision: int = 1) -> dict[str, float]:
+    """Round shares for display, then absorb the rounding error into the largest.
+
+    Rounding five numbers independently rarely lands on exactly 100, and a donut
+    whose slices sum to 99.9 is a visible defect. The largest slice takes the
+    correction because a ±0.1 adjustment is proportionally smallest there.
+    """
+    rounded = {source: round(share, precision) for source, share in shares.items()}
+    error = round(100.0 - sum(rounded.values()), precision)
+    if error:
+        largest = max(rounded, key=lambda source: rounded[source])
+        rounded[largest] = round(rounded[largest] + error, precision)
+    return rounded
 
 
 # --- sensors -----------------------------------------------------------------
@@ -81,15 +119,79 @@ class Sensor:
 
         return round(self.value, self.precision)
 
+    def extra_fields(self) -> dict:
+        """Extra payload keys for sensors that publish more than a scalar.
+
+        Called after next_value(), so it can report state that value derived from.
+        """
+        return {}
+
     def payload(self, site: str) -> dict:
-        return {
+        # Explicit ordering: next_value() must run before extra_fields(), which
+        # may depend on the state it just advanced.
+        value = self.next_value()
+        reading = {
             "sensor_id": self.sensor_id,
             "metric": self.metric,
-            "value": self.next_value(),
+            "value": value,
             "unit": self.unit,
             "site": site,
             "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
+        reading.update(self.extra_fields())
+        return reading
+
+
+@dataclass
+class CarbonSensor(Sensor):
+    """Grid carbon intensity, derived from a live generation mix.
+
+    Unlike the other sensors this does not random-walk its value directly. The
+    mix walks, and intensity falls out of it, so the donut and the number in the
+    card centre can never disagree — a mix that greens up drags intensity down
+    in the same tick.
+
+    `low`/`high` are inherited but unused: next_value() is fully overridden.
+    """
+
+    mix: dict[str, float] = field(default_factory=lambda: dict(BASELINE_MIX))
+    # Standard deviation of each source's per-tick drift, in percentage points.
+    mix_drift: float = 1.5
+    # How strongly each share is pulled back toward its baseline each tick.
+    #
+    # Without this the shares are a free random walk: measured over 2000 ticks
+    # coal wandered far enough to swing intensity between 19 and 692 gCO2/kWh,
+    # which is not a grid any more. A light pull keeps the mix wandering while
+    # staying recognisable. Set to 0.0 for the untethered walk.
+    mix_pull: float = 0.05
+
+    def _advance_mix(self) -> dict[str, float]:
+        drifted = {
+            source: max(
+                MIN_SHARE,
+                share
+                + random.gauss(0, self.mix_drift)
+                + (BASELINE_MIX[source] - share) * self.mix_pull,
+            )
+            for source, share in self.mix.items()
+        }
+        # Renormalise so the five shares still describe one whole grid.
+        total = sum(drifted.values())
+        normalised = {source: share * 100 / total for source, share in drifted.items()}
+        return round_to_100(normalised)
+
+    def next_value(self) -> float:
+        self.mix = self._advance_mix()
+        # Intensity comes from the published (rounded) shares, so the number in
+        # the card is exactly what the visible slices add up to.
+        intensity = sum(
+            share / 100 * EMISSION_FACTORS[source] for source, share in self.mix.items()
+        )
+        self.value = intensity
+        return round(intensity, self.precision)
+
+    def extra_fields(self) -> dict:
+        return {"mix": self.mix}
 
 
 def build_sensors() -> list[Sensor]:
@@ -97,7 +199,9 @@ def build_sensors() -> list[Sensor]:
     return [
         Sensor("lights-01", "lights", "k", 2700, 5000, 4300, precision=0),
         Sensor("water-01", "water", "m3", 5, 12, 8.4, precision=2),
-        Sensor("carbon-01", "carbon", "gCO2/kWh", 70, 140, 95, precision=1),
+        # low/high unused: intensity is derived from the mix, not walked. With
+        # the baseline mix it starts near 260 gCO2/kWh and moves with the coal share.
+        CarbonSensor("carbon-01", "carbon", "gCO2/kWh", 0, 900, 0, precision=1),
         Sensor("energy-01", "energy", "kWh", 2000, 6000, 3800, precision=0),
         Sensor("footfall-01", "footfall", "people", 40, 160, 120, precision=0),
     ]

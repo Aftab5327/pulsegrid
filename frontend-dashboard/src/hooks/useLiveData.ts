@@ -14,8 +14,13 @@ import { useSyncExternalStore } from 'react';
 const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000/ws';
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
-/** Matches HISTORY_SIZE in backend/main.py. */
-const HISTORY_LIMIT = 120;
+/**
+ * How many readings to keep per metric. Only a starting guess: the real figure
+ * is read from the backend's `history_size` at connect, so raising retention
+ * server-side widens the client window with no frontend change.
+ */
+const DEFAULT_HISTORY_LIMIT = 120;
+let historyLimit = DEFAULT_HISTORY_LIMIT;
 const RECONNECT_MS = 3000;
 /** Grace period before closing, so StrictMode's remount does not cycle the socket. */
 const CLOSE_GRACE_MS = 250;
@@ -32,6 +37,8 @@ export interface Reading {
   unit: string;
   site: string;
   ts: string;
+  /** Generation mix, source → percentage. Carbon only; null on every other metric. */
+  mix?: Record<string, number> | null;
 }
 
 export interface HistoryPoint {
@@ -82,13 +89,31 @@ function appendReading(reading: Reading): void {
 
   const points = state.history[reading.metric];
   const next = [...points, { ts: reading.ts, value: reading.value }];
-  if (next.length > HISTORY_LIMIT) next.splice(0, next.length - HISTORY_LIMIT);
+  if (next.length > historyLimit) next.splice(0, next.length - historyLimit);
 
   setState({
     ...state,
     latest: { ...state.latest, [reading.metric]: reading },
     history: { ...state.history, [reading.metric]: next },
   });
+}
+
+/**
+ * Learn the backend's retention so the client window matches it. Without this
+ * the cap would be a frontend constant that silently truncates any future
+ * increase in server-side history.
+ */
+async function fetchCapacity(signal: AbortSignal): Promise<void> {
+  try {
+    const response = await fetch(`${API_URL}/`, { signal });
+    if (!response.ok) return;
+    const body = (await response.json()) as { history_size?: unknown };
+    if (typeof body.history_size === 'number' && body.history_size > 0) {
+      historyLimit = body.history_size;
+    }
+  } catch {
+    // Backend not reachable: keep the current limit.
+  }
 }
 
 /**
@@ -149,7 +174,7 @@ async function seedHistory(signal: AbortSignal): Promise<void> {
     const newestSeeded = seeded[seeded.length - 1].ts;
     const live = state.history[metric].filter((point) => point.ts > newestSeeded);
     const merged = [...seeded, ...live];
-    history[metric] = merged.slice(-HISTORY_LIMIT);
+    history[metric] = merged.slice(-historyLimit);
   }
   setState({ ...state, history });
 }
@@ -169,8 +194,11 @@ function bootstrap(): void {
   bootstrapController?.abort();
   bootstrapController = new AbortController();
   const { signal } = bootstrapController;
-  void fetchLatest(signal);
-  void seedHistory(signal);
+  void (async () => {
+    // Capacity first: seedHistory trims to it.
+    await fetchCapacity(signal);
+    await Promise.all([fetchLatest(signal), seedHistory(signal)]);
+  })();
 }
 
 /**

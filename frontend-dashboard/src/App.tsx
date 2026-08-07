@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import './style.css';
 import { useConnected } from './hooks/useLiveData';
 import Logo from './components/Logo';
+import AnalysePage from './components/AnalysePage';
 import LightsCard from './components/LightsCard';
 import WaterCard from './components/WaterCard';
 import CarbonCard from './components/CarbonCard';
@@ -124,12 +125,7 @@ const App: React.FC = () => {
             </>
           )}
 
-          {activeSection === 'analyse' && (
-            <div className="placeholder-screen">
-              <h2>Analyse</h2>
-              <p>Detailed analytics view can be plugged in here.</p>
-            </div>
-          )}
+          {activeSection === 'analyse' && <AnalysePage />}
 
           {activeSection === 'control' && (
             <div className="placeholder-screen">

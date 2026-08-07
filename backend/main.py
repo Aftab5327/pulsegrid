@@ -70,6 +70,9 @@ class Reading(BaseModel):
     unit: str
     site: str
     ts: str
+    # Only the carbon sensor publishes a generation mix. Optional so the other
+    # four sensors, which omit the key entirely, still validate.
+    mix: dict[str, float] | None = None
 
 
 # --- in-memory store ---------------------------------------------------------
