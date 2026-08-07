@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { API_URL } from '../utils/api';
 
 /**
  * Live telemetry from the FastAPI backend.
@@ -12,7 +13,6 @@ import { useSyncExternalStore } from 'react';
  */
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000/ws';
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 /**
  * How many readings to keep per metric. Only a starting guess: the real figure
@@ -39,6 +39,9 @@ export interface Reading {
   ts: string;
   /** Generation mix, source → percentage. Carbon only; null on every other metric. */
   mix?: Record<string, number> | null;
+  /** Controllable devices only: power state and the target the walk eases toward. */
+  on?: boolean | null;
+  target?: number | null;
 }
 
 export interface HistoryPoint {

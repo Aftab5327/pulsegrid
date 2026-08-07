@@ -39,7 +39,11 @@ PUBLISH_INTERVAL = float(os.getenv("PUBLISH_INTERVAL", "2.0"))
 SITE = os.getenv("SITE", "building-1")
 MQTT_QOS = int(os.getenv("MQTT_QOS", "1"))
 
-TOPIC_TEMPLATE = "digispace/sensors/{sensor_id}/telemetry"
+MQTT_TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "digispace")
+
+TOPIC_TEMPLATE = f"{MQTT_TOPIC_PREFIX}/sensors/{{sensor_id}}/telemetry"
+COMMAND_TEMPLATE = f"{MQTT_TOPIC_PREFIX}/sensors/{{sensor_id}}/command"
+COMMAND_WILDCARD = f"{MQTT_TOPIC_PREFIX}/sensors/+/command"
 
 # --- generation mix ----------------------------------------------------------
 
@@ -126,6 +130,13 @@ class Sensor:
         """
         return {}
 
+    def apply_command(self, command: dict) -> bool:
+        """Apply a control command. Returns True if anything changed.
+
+        Base sensors are read-only and ignore commands.
+        """
+        return False
+
     def payload(self, site: str) -> dict:
         # Explicit ordering: next_value() must run before extra_fields(), which
         # may depend on the state it just advanced.
@@ -140,6 +151,63 @@ class Sensor:
         }
         reading.update(self.extra_fields())
         return reading
+
+
+@dataclass
+class LightsSensor(Sensor):
+    """Colour temperature, controllable from the dashboard.
+
+    `on` gates output entirely — when off it reports 0, which is outside the
+    2700-5000 operating range and so reads unambiguously as "not lit" rather
+    than "dimmed". `target` gives the walk something to gravitate toward
+    instead of wandering freely; clearing it returns to the free walk.
+
+    State is mutated from paho's network thread (see Simulator._on_message)
+    while the publish loop reads it. Only plain attribute assignment of a bool
+    and a float is involved, so no lock is needed here.
+    """
+
+    on: bool = True
+    target: float | None = None
+    # Fraction of the remaining gap closed per tick when a target is set.
+    pull: float = 0.25
+
+    def apply_command(self, command: dict) -> bool:
+        changed = False
+
+        if "on" in command and isinstance(command["on"], bool):
+            if self.on != command["on"]:
+                self.on = command["on"]
+                changed = True
+
+        if "target" in command:
+            requested = command["target"]
+            if requested is None:
+                if self.target is not None:
+                    self.target = None
+                    changed = True
+            elif isinstance(requested, (int, float)) and not isinstance(requested, bool):
+                clamped = max(self.low, min(self.high, float(requested)))
+                if self.target != clamped:
+                    self.target = clamped
+                    changed = True
+
+        return changed
+
+    def next_value(self) -> float:
+        if not self.on:
+            return 0.0
+        if self.target is None:
+            return super().next_value()
+
+        # Ease toward the target, with a little noise so it still looks live
+        # rather than snapping to an exact number and freezing there.
+        self.value += (self.target - self.value) * self.pull + random.gauss(0, self._step * 0.3)
+        self.value = max(self.low, min(self.high, self.value))
+        return round(self.value, self.precision)
+
+    def extra_fields(self) -> dict:
+        return {"on": self.on, "target": self.target}
 
 
 @dataclass
@@ -197,7 +265,7 @@ class CarbonSensor(Sensor):
 def build_sensors() -> list[Sensor]:
     """Start each sensor mid-range so nothing opens pinned to a bound."""
     return [
-        Sensor("lights-01", "lights", "k", 2700, 5000, 4300, precision=0),
+        LightsSensor("lights-01", "lights", "k", 2700, 5000, 4300, precision=0),
         Sensor("water-01", "water", "m3", 5, 12, 8.4, precision=2),
         # low/high unused: intensity is derived from the mix, not walked. With
         # the baseline mix it starts near 260 gCO2/kWh and moves with the coal share.
@@ -213,6 +281,7 @@ def build_sensors() -> list[Sensor]:
 class Simulator:
     def __init__(self) -> None:
         self.sensors = build_sensors()
+        self.by_id = {sensor.sensor_id: sensor for sensor in self.sensors}
         self.running = True
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
@@ -220,14 +289,47 @@ class Simulator:
         )
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
+        self.client.on_message = self._on_message
         # Cap the backoff so a broker restart is picked up promptly.
         self.client.reconnect_delay_set(min_delay=1, max_delay=10)
 
     def _on_connect(self, _client, _userdata, _flags, reason_code, _properties=None):
         if reason_code == 0:
             print(f"connected to {MQTT_HOST}:{MQTT_PORT}", flush=True)
+            # Resubscribe on every connect, not just the first: after a broker
+            # restart paho reconnects but subscriptions do not survive.
+            self.client.subscribe(COMMAND_WILDCARD, qos=1)
+            print(f"listening for commands on {COMMAND_WILDCARD}", flush=True)
         else:
             print(f"connect failed: {reason_code}", file=sys.stderr, flush=True)
+
+    def _on_message(self, _client, _userdata, message):
+        """Route an inbound command to its sensor. Never raises: a malformed
+        command must not kill paho's network thread."""
+        parts = message.topic.split("/")
+        if len(parts) < 2:
+            return
+        sensor_id = parts[-2]
+
+        sensor = self.by_id.get(sensor_id)
+        if sensor is None:
+            print(f"command for unknown sensor '{sensor_id}'", file=sys.stderr, flush=True)
+            return
+
+        try:
+            command = json.loads(message.payload)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            print(f"ignoring non-JSON command on {message.topic}", file=sys.stderr, flush=True)
+            return
+
+        if not isinstance(command, dict):
+            print(f"ignoring non-object command on {message.topic}", file=sys.stderr, flush=True)
+            return
+
+        if sensor.apply_command(command):
+            print(f"command applied: {sensor_id} <- {command}", flush=True)
+        else:
+            print(f"command ignored (no change): {sensor_id} <- {command}", flush=True)
 
     def _on_disconnect(self, _client, _userdata, _flags, reason_code, _properties=None):
         if self.running and reason_code != 0:

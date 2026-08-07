@@ -672,3 +672,196 @@ body {
   font-size: 13px;
   font-weight: 600;
 }
+
+/* --- Control page -------------------------------------------------------- */
+/* Cards reuse .card; the classes below are layout and control affordances
+   only. .toggle-track-off is additive — the Home cards never use it. */
+
+.control-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.control-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.control-error {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(241, 95, 97, 0.12);
+  border: 1px solid rgba(241, 95, 97, 0.35);
+  color: #ffb4b5;
+  font-size: 11px;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 22px;
+  align-content: start;
+}
+
+.control-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.control-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.control-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.control-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.control-state {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.toggle-button {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.toggle-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.toggle-track-off {
+  justify-content: flex-start;
+  border-color: rgba(143, 155, 181, 0.3);
+}
+
+.toggle-track-off .toggle-thumb {
+  background: radial-gradient(circle at 30% 20%, #cbd5e1, #8f9bb5 60%);
+  box-shadow: none;
+}
+
+.control-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.control-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.control-target {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--accent-strong);
+}
+
+.control-slider {
+  width: 100%;
+  accent-color: #00ffd1;
+  cursor: pointer;
+}
+
+.control-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.control-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.control-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ghost-button {
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(8, 18, 24, 0.9);
+  border: 1px solid rgba(18, 243, 208, 0.22);
+  color: #d3fdf6;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ghost-button:hover:not(:disabled) {
+  border-color: rgba(18, 243, 208, 0.5);
+  background: rgba(18, 243, 208, 0.08);
+}
+
+.ghost-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.control-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.readonly-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.readonly-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.readonly-name {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.readonly-value {
+  font-size: 13px;
+  font-weight: 600;
+}

@@ -3,6 +3,7 @@ import './style.css';
 import { useConnected } from './hooks/useLiveData';
 import Logo from './components/Logo';
 import AnalysePage from './components/AnalysePage';
+import ControlPage from './components/ControlPage';
 import LightsCard from './components/LightsCard';
 import WaterCard from './components/WaterCard';
 import CarbonCard from './components/CarbonCard';
@@ -127,12 +128,7 @@ const App: React.FC = () => {
 
           {activeSection === 'analyse' && <AnalysePage />}
 
-          {activeSection === 'control' && (
-            <div className="placeholder-screen">
-              <h2>Control</h2>
-              <p>Device control view can be implemented here.</p>
-            </div>
-          )}
+          {activeSection === 'control' && <ControlPage />}
         </main>
       </div>
     </div>
