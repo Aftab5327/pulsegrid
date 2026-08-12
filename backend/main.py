@@ -34,6 +34,7 @@ import math
 import os
 import re
 import sys
+import ssl
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -57,6 +58,9 @@ log = logging.getLogger("digispace")
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
+MQTT_TLS = os.getenv("MQTT_TLS", "false").lower() == "true"
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "digispace/sensors/+/telemetry")
 # Prefix for outbound control topics: <prefix>/sensors/<sensor_id>/command.
 # Same prefix the simulator publishes telemetry under.
@@ -403,7 +407,13 @@ async def mqtt_listener() -> None:
     """Subscribe and stay subscribed. Reconnects forever; never raises."""
     while True:
         try:
-            async with aiomqtt.Client(hostname=MQTT_HOST, port=MQTT_PORT) as client:
+            async with aiomqtt.Client(
+            hostname=MQTT_HOST,
+            port=MQTT_PORT,
+            username=MQTT_USERNAME,
+            password=MQTT_PASSWORD,
+            tls_params=aiomqtt.TLSParameters(cert_reqs=ssl.CERT_REQUIRED) if MQTT_TLS else None,
+            ) as client:
                 await client.subscribe(MQTT_TOPIC)
                 log.info("subscribed to %s on %s:%d", MQTT_TOPIC, MQTT_HOST, MQTT_PORT)
                 await manager.broadcast({"type": "broker", "connected": True})
@@ -575,7 +585,13 @@ async def control(device: str, command: Command) -> dict:
     # and commands are rare enough that a connection per command is cheaper
     # than sharing state across tasks.
     try:
-        async with aiomqtt.Client(hostname=MQTT_HOST, port=MQTT_PORT) as client:
+        async with aiomqtt.Client(
+        hostname=MQTT_HOST,
+        port=MQTT_PORT,
+        username=MQTT_USERNAME,
+        password=MQTT_PASSWORD,
+        tls_params=aiomqtt.TLSParameters(cert_reqs=ssl.CERT_REQUIRED) if MQTT_TLS else None,
+        ) as client:
             await client.publish(topic, json.dumps(payload), qos=1)
     except aiomqtt.MqttError as exc:
         log.warning("command publish to %s failed: %s", topic, exc)
