@@ -431,7 +431,7 @@ async def simulator_task() -> None:
                 username=MQTT_USERNAME,
                 password=MQTT_PASSWORD,
                 tls_params=tls_params,
-                identifier="pulsegrid-simulator",
+                identifier=f"pulsegrid-simulator-{os.getpid()}",
                 clean_start=True,
                 protocol=aiomqtt.ProtocolVersion.V5,
             ) as client:
