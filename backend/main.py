@@ -432,6 +432,7 @@ async def simulator_task() -> None:
                 tls_params=tls_params,
                 identifier="pulsegrid-simulator",
                 clean_start=True,
+                protocol=aiomqtt.ProtocolVersion.V5,
             ) as client:
                 log.info("simulator: connected, publishing to %s", MQTT_TOPIC_PREFIX)
                 while True:
@@ -488,6 +489,7 @@ async def mqtt_listener() -> None:
             tls_params=aiomqtt.TLSParameters(cert_reqs=ssl.CERT_REQUIRED) if MQTT_TLS else None,
             identifier="pulsegrid-backend",
             clean_start=True,
+            protocol=aiomqtt.ProtocolVersion.V5,
             ) as client:
                 await client.subscribe(MQTT_TOPIC)
                 log.info("subscribed to %s on %s:%d", MQTT_TOPIC, MQTT_HOST, MQTT_PORT)
@@ -673,6 +675,7 @@ async def control(device: str, command: Command) -> dict:
         tls_params=aiomqtt.TLSParameters(cert_reqs=ssl.CERT_REQUIRED) if MQTT_TLS else None,
         identifier="pulsegrid-control",
         clean_start=True,
+        protocol=aiomqtt.ProtocolVersion.V5,
         ) as client:
             await client.publish(topic, json.dumps(payload), qos=1)
     except aiomqtt.MqttError as exc:
