@@ -431,6 +431,7 @@ async def simulator_task() -> None:
                 password=MQTT_PASSWORD,
                 tls_params=tls_params,
                 identifier="pulsegrid-simulator",
+                clean_start=True,
             ) as client:
                 log.info("simulator: connected, publishing to %s", MQTT_TOPIC_PREFIX)
                 while True:
@@ -471,7 +472,7 @@ async def simulator_task() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.warning("simulator: connection error (%s); retrying in 5s", exc)
+            log.warning("simulator: connection error (%s: %r); retrying in 5s", type(exc).__name__, exc)
             await asyncio.sleep(5)
 
 
@@ -486,6 +487,7 @@ async def mqtt_listener() -> None:
             password=MQTT_PASSWORD,
             tls_params=aiomqtt.TLSParameters(cert_reqs=ssl.CERT_REQUIRED) if MQTT_TLS else None,
             identifier="pulsegrid-backend",
+            clean_start=True,
             ) as client:
                 await client.subscribe(MQTT_TOPIC)
                 log.info("subscribed to %s on %s:%d", MQTT_TOPIC, MQTT_HOST, MQTT_PORT)
@@ -670,6 +672,7 @@ async def control(device: str, command: Command) -> dict:
         password=MQTT_PASSWORD,
         tls_params=aiomqtt.TLSParameters(cert_reqs=ssl.CERT_REQUIRED) if MQTT_TLS else None,
         identifier="pulsegrid-control",
+        clean_start=True,
         ) as client:
             await client.publish(topic, json.dumps(payload), qos=1)
     except aiomqtt.MqttError as exc:
