@@ -53,6 +53,7 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("digispace")
+logging.getLogger("aiomqtt").setLevel(logging.DEBUG)
 
 # --- configuration -----------------------------------------------------------
 
@@ -663,7 +664,7 @@ async def control(device: str, command: Command) -> dict:
     # as a null so the device can clear its target and resume a free walk.
     payload = command.model_dump(exclude_unset=True)
 
-    # Short-lived publisher: the ingest client lives inside the listener task,
+    # Short-lived publisher: the ingest client lives inside the listener task,--
     # and commands are rare enough that a connection per command is cheaper
     # than sharing state across tasks.
     try:
