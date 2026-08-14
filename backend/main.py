@@ -474,7 +474,7 @@ async def simulator_task() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.warning("simulator: connection error (%s: %r); retrying in 5s", type(exc).__name__, exc)
+            log.warning("simulator: connection error (%s: %r); rc=%s; args=%s; retrying in 5s", type(exc).__name__, exc, getattr(exc, "rc", None), exc.args)
             await asyncio.sleep(5)
 
 
