@@ -67,6 +67,7 @@ MQTT_TOPIC = os.getenv("MQTT_TOPIC", "digispace/sensors/+/telemetry")
 MQTT_TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "digispace")
 COMMAND_TEMPLATE = f"{MQTT_TOPIC_PREFIX}/sensors/{{sensor_id}}/command"
 HISTORY_SIZE = int(os.getenv("HISTORY_SIZE", "120"))
+SITE_ID = os.getenv("SITE_ID", "building-1")
 CORS_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
@@ -401,6 +402,76 @@ async def handle_message(topic: str, payload: bytes) -> None:
     # batching writer only enqueues, and InfluxStore swallows its own errors.
     influx.write_reading(reading)
     await manager.broadcast({"type": "reading", "data": reading.model_dump()})
+RUN_SIMULATOR = os.getenv("RUN_SIMULATOR", "false").lower() == "true"
+
+async def simulator_task() -> None:
+    """Publishes simulated sensor telemetry, running only when RUN_SIMULATOR=true
+    (used on Render's free tier, where we can't run a separate worker process)."""
+    import random
+    from datetime import datetime, timezone
+
+    sensors = [
+        {"sensor_id": "lights-01", "metric": "lights", "unit": "k", "value": 4300, "low": 2700, "high": 5000, "step": 60},
+        {"sensor_id": "water-01", "metric": "water", "unit": "m3", "value": 8.42, "low": 5.0, "high": 12.0, "step": 0.15},
+        {"sensor_id": "energy-01", "metric": "energy", "unit": "kWh", "value": 4300, "low": 2000, "high": 6000, "step": 120},
+        {"sensor_id": "footfall-01", "metric": "footfall", "unit": "people", "value": 110, "low": 40, "high": 160, "step": 8},
+    ]
+    mix = {"solar": 15.0, "wind": 15.0, "nuclear": 20.0, "hydro": 20.0, "coal": 30.0}
+    factors = {"solar": 48.0, "wind": 11.0, "nuclear": 12.0, "hydro": 24.0, "coal": 820.0}
+
+    while True:
+        try:
+            tls_params = (
+                aiomqtt.TLSParameters(cert_reqs=ssl.CERT_REQUIRED) if MQTT_TLS else None
+            )
+            async with aiomqtt.Client(
+                hostname=MQTT_HOST,
+                port=MQTT_PORT,
+                username=MQTT_USERNAME,
+                password=MQTT_PASSWORD,
+                tls_params=tls_params,
+            ) as client:
+                log.info("simulator: connected, publishing to %s", MQTT_TOPIC_PREFIX)
+                while True:
+                    for s in sensors:
+                        s["value"] += random.uniform(-s["step"], s["step"])
+                        s["value"] = max(s["low"], min(s["high"], s["value"]))
+                        payload = {
+                            "sensor_id": s["sensor_id"],
+                            "metric": s["metric"],
+                            "value": round(s["value"], 2),
+                            "unit": s["unit"],
+                            "site": SITE_ID,
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        }
+                        topic = f"{MQTT_TOPIC_PREFIX}/sensors/{s['sensor_id']}/telemetry"
+                        await client.publish(topic, json.dumps(payload), qos=0)
+
+                    for k in mix:
+                        mix[k] = max(0.5, mix[k] + random.uniform(-1.5, 1.5))
+                    total = sum(mix.values())
+                    mix_norm = {k: round(v * 100 / total, 1) for k, v in mix.items()}
+                    intensity = sum(mix_norm[k] / 100 * factors[k] for k in mix_norm)
+                    carbon_payload = {
+                        "sensor_id": "carbon-01",
+                        "metric": "carbon",
+                        "value": round(intensity, 1),
+                        "unit": "gCO2/kWh",
+                        "site": SITE_ID,
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "mix": mix_norm,
+                    }
+                    await client.publish(
+                        f"{MQTT_TOPIC_PREFIX}/sensors/carbon-01/telemetry",
+                        json.dumps(carbon_payload),
+                        qos=0,
+                    )
+                    await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("simulator: connection error (%s); retrying in 5s", exc)
+            await asyncio.sleep(5)
 
 
 async def mqtt_listener() -> None:
@@ -443,16 +514,21 @@ async def lifespan(app: FastAPI):
     # the event loop. A failure here is logged, not fatal.
     await asyncio.to_thread(influx.connect)
 
-    task = asyncio.create_task(mqtt_listener(), name="mqtt-listener")
-    log.info("backend up; broker %s:%d", MQTT_HOST, MQTT_PORT)
+    tasks = [asyncio.create_task(mqtt_listener(), name="mqtt-listener")]
+    if RUN_SIMULATOR:
+        tasks.append(asyncio.create_task(simulator_task(), name="simulator"))
+        log.info("simulator task enabled (RUN_SIMULATOR=true)")
+        log.info("backend up; broker %s:%d", MQTT_HOST, MQTT_PORT)
     try:
         yield
     finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        for t in tasks:
+            t.cancel()
+        for t in tasks:
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
         await asyncio.to_thread(influx.close)
         log.info("backend down")
 
